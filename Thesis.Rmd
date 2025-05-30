@@ -1,0 +1,221 @@
+---
+title: "Thesis"
+author: "Jared Keirn"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 5
+)
+# set.seed(123) # Uncomment for reproducibility
+```
+
+# Introduction
+
+This notebook explores the prevalence of Adverse Childhood Experiences (ACEs) among adolescent and young women in Kenya, and associations with adulthood risk behavior.
+
+# Libraries
+
+```{r libraries}
+library(dplyr)
+library(tidyr)
+library(readr)
+library(knitr)
+library(skimr)  
+library(naniar) 
+```
+
+# Data Import
+
+```{r load-data}
+# Use a relative path for reproducibility
+data_path <- "/Users/jaredkeirn/Dropbox/My Mac (Jrod)/Desktop/Thesis/AGYWPharmacyPrEPRCT-JKExport_DATA_2025-05-28_1825.csv"
+agyw_redcap <- read_csv(data_path)
+
+# Quick data overview
+head(agyw_redcap)
+summary(agyw_redcap)
+str(agyw_redcap)
+```
+
+# Event Order (Chronological)
+
+```{r event-order}
+event_order <- c(
+  "enrollment_arm_1",
+  "1_month_fup_arm_1",
+  "4_month_fup_arm_1",
+  "7_month_fup_arm_1",
+  "10_month_fup_arm_1",
+  "interim_visit_arm_1",
+  "termination_arm_1"
+)
+```
+
+# Collapse to One Row Per Participant
+
+```{r collapse-data}
+prioritize_enrollment <- function(x, event) {
+  enroll_val <- x[event == "enrollment_arm_1"]
+  if (length(enroll_val) > 0 && !is.na(enroll_val[1])) {
+    return(enroll_val[1])
+  } else {
+    return(na.omit(x)[1])
+  }
+}
+
+agyw_collapsed <- agyw_redcap %>%
+  group_by(clt_ptid) %>%
+  summarise(
+    across(starts_with("ace_"), ~ na.omit(.)[1], .names = "{.col}"),
+    across(
+      .cols = c(-redcap_event_name, -starts_with("ace_")),
+      .fns = ~ prioritize_enrollment(., redcap_event_name), 
+      .names = "{.col}"
+    ),
+    .groups = 'drop'
+  )
+
+head(agyw_collapsed)
+summary(agyw_collapsed)
+```
+
+# Filter Participants (Aged 18+) and Drop REDCap Admin Columns
+
+```{r filter-clean}
+agyw_filtered <- agyw_collapsed %>%
+  filter(!is.na(dem_age) & dem_age >= 18) %>%
+  select(-starts_with("redcap_"))
+head(agyw_filtered)
+summary(agyw_filtered)
+```
+
+# Explore ACE Variable Frequencies
+
+```{r ace-frequencies}
+ace_columns <- names(agyw_filtered)[startsWith(names(agyw_filtered), "ace_")]
+
+for (col in ace_columns) {
+  print(paste("Frequency for column:", col))
+  kable(as.data.frame(table(agyw_filtered[[col]], useNA = "ifany")),
+        caption = col)
+}
+```
+
+# Recode Special Codes (`77 = Refused`, `88 = Not sure`) as NA
+
+```{r recode-special-codes}
+knitr::kable(data.frame(Column = names(agyw_filtered)), caption = "List of Columns")
+
+col_with_77 <- c("ace_married", "ace_marchoose", "ace_marconsent", "ace_parprob",
+                 "ace_parknow","ace_parfood","ace_pardrunk", "ace_parschool",
+                 "ace_famaddict","ace_famdepr","ace_famjail", "ace_pardivor",
+                 "ace_pardie", "ace_hminsult","ace_attemptintercorse","ace_abandon",
+                 "ace_hmviolence", "ace_forceintercourse", "ace_hmviolenceobj", "ace_insult",
+                 "ace_violence", "ace_bullied", "ace_violenceobj", "ace_bullymeth", "ace_fight",
+                 "ace_sexassult", "ace_cmbeat", "ace_forcetouch", "ace_cmstab", "ace_cmthreat", "ace_move",
+                 "ace_destruct", "ace_colbeat","ace_colfmviol", )
+
+col_with_88 <- c("ace_marchoose", "ace_pardivor", "ace_pardie")
+
+agyw_filtered <- agyw_filtered %>%
+  mutate(
+    across(all_of(col_with_77), ~na_if(., 77)),
+    across(all_of(col_with_88), ~na_if(., 88))
+  )
+```
+
+# Rename Age Variable
+
+```{r rename-age}
+agyw_trans <- agyw_filtered %>%
+  rename(Age_years = dem_age)
+```
+
+# Recoding Example (Bundle Multiple Recodes)
+
+```{r ace-recoding}
+agyw_trans <- agyw_trans %>%
+  mutate(
+    ace_parprob_yn = ifelse(ace_parprob %in% c(1:4), 0, ifelse(ace_parprob == 5, 1, NA)),
+    ace_parknow_yn = case_when(
+      ace_parknow %in% c(1:4) ~ 0,
+      ace_parknow == 5 ~ 1,
+      TRUE ~ NA_real_
+    ),
+    ace_parfood_yn = case_when(
+      ace_parfood == 1 ~ 1,
+      ace_parfood %in% c(2,3,0) ~ 0,
+      TRUE ~ NA_real_
+    ),
+    ace_pardrunk_yn = case_when(
+      ace_pardrunk == 1 ~ 1,
+      ace_pardrunk %in% c(2,3,0) ~ 0,
+      TRUE ~ NA_real_
+    )
+    # ...continue for other recodes...
+  )
+```
+
+# Inspect and Summarize Key Variables
+
+```{r inspect-key-vars}
+kable(table(agyw_trans$ace_married, useNA = "ifany"), caption = "Ever Married?")
+kable(table(agyw_trans$ace_marriedage, useNA = "ifany"), caption = "Age First Married")
+kable(table(agyw_trans$ace_parprob_yn, useNA = "ifany"), caption = "Parental Understanding (YN)")
+kable(table(agyw_trans$ace_parknow_yn, useNA = "ifany"), caption = "Parental Knowledge (YN)")
+```
+
+# Covariates and Outcomes (Descriptives)
+
+```{r covariates-outcomes}
+kable(table(agyw_trans$dem_school_year, useNA = "ifany"), caption = "Years of Education")
+kable(table(agyw_trans$dem_area_live_in, useNA = "ifany"), caption = "Area Type")
+kable(table(agyw_trans$dem_formally_employed, useNA = "ifany"), caption = "Formally Employed")
+kable(table(agyw_trans$dem_without_condom, useNA = "ifany"), caption = "Had Sex Without Condom")
+kable(table(agyw_trans$dem_sex_money, useNA = "ifany"), caption = "Sex in Exchange for Money/Favors")
+kable(table(agyw_trans$dem_intravenous_drugs, useNA = "ifany"), caption = "Intravenous Drug Use")
+```
+
+# Save Processed Data
+
+```{r save-processed}
+saveRDS(agyw_trans, file = "data/agyw_processed.rds")
+print("Data frame saved successfully to: data/agyw_processed.rds")
+```
+
+# (Optional) Visualize Missing Data
+
+```{r missing-data-visual, eval=FALSE}
+# library(naniar)
+# gg_miss_var(agyw_trans, show_pct = TRUE)
+```
+
+# (Optional) Skim Summary
+
+```{r skim-summary, eval=FALSE}
+# library(skimr)
+# skim(agyw_trans)
+```
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
+
+# Conclusion
+
+This notebook processes, recodes, and summarizes the AGYW REDCap data for further analysis of ACEs and risk behavior.\
+For further modeling or visualization, add new sections below.
