@@ -1,0 +1,347 @@
+---
+title: "Thesis Analysis"
+author: "Jared Keirn"
+date: "2025-04-30"
+output: html_document
+---
+```{r}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE) # Example global options
+library(dplyr)
+library(tidyr)
+library(ggplot2) 
+library(gtsummary) 
+library(gt)
+```
+
+Importing the cleaned and transformed dataset. 
+```{r}
+agyw_exp <- readRDS("/Users/jaredkeirn/Dropbox/My Mac (Jrod)/Desktop/Thesis/agyw_processed.rds")
+#summary(agyw_exp)
+#str(agyw_exp)
+```
+
+```{r}
+ace_columns <- names(agyw_exp)[startsWith(names(agyw_exp), "ace_")]
+
+# Start a loop that iterates through each column name in the 'ace_columns' vector.
+for (col in ace_columns) {
+  # Print a descriptive message indicating which column's frequency is being displayed.
+  # The paste() function combines the string "Frequency for column:" with the current column name.
+  print(paste("Frequency for column:", col))
+
+  # Use the table() function to calculate and display the frequency of each unique value
+  # within the current column. 'agyw_collapsed[[col]]' accesses the column by its name (stored in 'col').
+  print(table(agyw_exp[[col]], useNA = "ifany"))
+
+  # Print a newline character using cat("\n") to add a blank line after the frequency table
+  # for better readability of the output when multiple columns are processed.
+  cat("\n")
+}
+```
+
+
+Creating an ACE indicator according to the 13 categories: emotional abuse; physical abuse; sexual abuse; violence against household members; living with household members who were substance abusers; living with household members who were mentally ill or suicidal; living with household members who were imprisoned; one or no parents, parental separation or divorce; emotional neglect; physical neglect; bullying; community violence; collective violence. This variable is labeled [ace_total_score]. Next the [ace_bin] variable is created from the ACE total score. This binary variable is factored into two categories. The High ACE Score = 4 or more affirmative responses to the 13 categories and the Low ACE Score = 3 affirmative responses or less. 
+```{r}
+#Creating a list of the 30 ACE variables that will be used to impute the ACE Score. These variables are the final binary indicators.
+ace_indicator_cols <- c("ace_parprob_yn","ace_parknow_yn","ace_parfood_yn","ace_pardrunk_yn","ace_parschool_yn","ace_famaddict","ace_famdepr", "ace_famjail", "ace_pardivor", "ace_pardie", "ace_hminsult_yn", "ace_hmviolence_yn","ace_hmviolenceobj_yn", "ace_sexassult_yn", "ace_forcetouch_yn", "ace_attemptintercorse_yn","ace_forceintercourse_yn","ace_insult_yn", "ace_abandon_yn", "ace_violence_yn", "ace_violenceobj_yn","ace_bullied_yn", "ace_fight_yn","ace_cmbeat_yn", "ace_cmstab_yn", "ace_cmthreat_yn","ace_move_yn","ace_destruct_yn", "ace_colbeat_yn", "ace_colfmviol_yn")
+
+#Ensuring [ace_indicator_cols] has unique column headers
+ace_indicator_cols <- unique(ace_indicator_cols)
+
+# For each participant, count how many of these ACE questions they answered (i.e., are not NA)
+#This creates a new column, e.g., 'answered_ace_count'.
+if (all(ace_indicator_cols %in% names(agyw_exp))) {
+  agyw_exp$answered_ace_count <- rowSums(!is.na(agyw_exp[, ace_indicator_cols]))
+} else {
+  stop("One or more column names in 'ace_indicator_cols' are not found in 'agyw_exp'. Please check your variable list.")
+}
+
+print("Distribution of the number of ACE questions answered per participant:")
+print(table(agyw_exp$answered_ace_count, useNA = "ifany"))
+
+# Define your threshold
+minimum_answered_threshold <- 26
+
+# Filter the dataset based on at least 26 ACE questions answered
+agyw_analysis <- agyw_exp %>%
+  filter(answered_ace_count >= minimum_answered_threshold)
+```
+
+
+```{r}
+#Function that sums the number of affirmative responses to the 31 ACE questions
+agyw_analysis$ace_total_score <- rowSums(agyw_analysis[, ace_indicator_cols], na.rm = FALSE) #TRUE will not include
+table(agyw_analysis$ace_total_score)
+
+#Create a factored [ace_bin] variable
+# 1 = 4+ aces
+# 0 = 0-3 aces
+agyw_analysis$ace_bin <- ifelse(is.na(agyw_analysis$ace_total_score), NA, # Handle NAs from total_score
+                                ifelse(agyw_analysis$ace_total_score >= 4, 1, 2))
+agyw_analysis$ace_bin <- factor(agyw_analysis$ace_bin, 
+                                levels = c(1, 2), # Assuming 1 is High, 2 is Low
+                                labels = c("High ACE (4+)", "Low ACE (0-3)")) # Adjusted labels for clarity
+
+# Identify rows where ace_bin is NA
+na_ace_bin_rows <- agyw_analysis[is.na(agyw_analysis$ace_bin), ]
+print(head(na_ace_bin_rows[, c("clt_ptid", "ace_total_score", "ace_bin")])) 
+
+```
+
+Exploration of ACE variables - Creating a data frame with ACE category and associated questions asked to participant during enrollment of the AGYW PREP study. The 13 ACE category and the 30 ACE variables associated with each category. 
+```{r}
+ace_table_structure <- data.frame(
+  stringsAsFactors = FALSE,
+  ace_Category = c("Physical Abuse", "Physical Abuse", 
+                   "Emotional Abuse", "Emotional Abuse",
+                   "Contact Sexual abuse", "Contact Sexual abuse", "Contact Sexual abuse",
+                   "Contact Sexual abuse",
+                   "Alcohol and/or drug abuser in the household", 
+                   "Incarcerated household member", 
+                   "Household member that is chronically depressed, mentally ill,
+                   institutionalized or suicidal", 
+                   "Household member treated violently", "Household member treated
+                   violently","Household member treated violently",
+                   "One or no parents, parental separation or divorce", "One or no parents,
+                   parental separation or divorce",
+                   "Emotional Neglect", "Emotional Neglect",
+                   "Physical neglect", "Physical neglect", "Physical neglect",
+                   "Bullying", "Bullying", 
+                   "Community violence", "Community violence", "Community violence",
+                   "Collective violence", "Collective violence", "Collective violence",
+                   "Collective violence"),
+  question_of_ACE = 
+    c("(A3) Did a parent, guardian or other household member spank, slap, kick, punch or beat you up?",
+      "A4) Did a parent, guardian or other household member hit or cut you with an object, such as a stick (or cane), bottle, club,       knife, whip etc?", 
+      "(A1) Did a parent, guardian or other household member yell, scream or swear at you, insult or humiliate you?", 
+      "(A2) Did a parent, guardian or other household member threaten to, or actually, abandon you or throw you out of the house?",
+      "A5) Did someone touch or fondle you in a sexual way when you did not want them to?", 
+      "A6) Did someone make you touch their body in a sexual way when you did not want them to?",
+      "A7) Did someone attempt oral, anal, or vaginal intercourse with you when you did not want them to?",
+      "A8) Did someone actually have oral, anal, or vaginal intercourse with you when you did not want them to?",
+      "F1) Did you live with a household member who was a problem drinker or alcoholic, or misused street or prescription drugs?", 
+      "F3) Did you live with a household member who was ever sent to jail or prison?",
+      "F2) Did you live with a household member who was depressed, mentally ill or suicidal?",
+      "F6) Did you see or hear a parent or household member in your home being yelled at, screamed at, sworn at,
+      insulted or humiliated?", 
+      "F7) Did you see or hear a parent or household member in your home being slapped, kicked, punched or beaten up?", 
+      "F8) Did you see or hear a parent or household member in your home being hit or cut with an object, such as a stick (or
+      cane), bottle, club, knife, whip etc.?", 
+      "F4) Were your parents ever separated or divorced?", 
+      "F5) Did your mother, father or guardian die?", 
+      "P1) Did your parents/guardians understand your problems and worries?", 
+      "P2) Did your parents/guardians really know what you were doing with your free time when you were not at school or work?",
+      "P3) Did your parents/guardians not give you enough food even when they could easily have done so?", 
+      "P4) Were your parents/guardians too drunk or intoxicated by drugs to take care of you?", 
+      "P5) Did your parents/guardians not send you to school even when it was available",
+      "V1) Were you bullied?",
+      "V2) How often were you in a physical fight?",
+      "V4) Did you see or hear someone being beaten up in real life?", 
+      "V5)Did you see or hear someone being stabbed or shot in real life?", 
+      "V6) Did you see or hear someone being threatened with a knife or gun in real life?",
+      "V7) Were you forced to go and live in another place due to any of these events?",
+      "V8) Did you experience the deliberate destruction of your home due to any of these events?", 
+      "V9) Were you beaten up by soldiers, police, militia, or gangs?", 
+      "V10) Was a family member or friend killed or beaten up by soldiers, police, militia, or gangs?"),
+  Variable_Name = c(
+    "ace_violence_yn",         # A3, Physical Abuse
+    "ace_violenceobj_yn",      # A4, Physical Abuse
+    "ace_insult_yn",           # A1, Emotional Abuse
+    "ace_abandon_yn",          # A2, Emotional Abuse
+    "ace_sexassult_yn",        # A5, Contact Sexual Abuse
+    "ace_forcetouch_yn",       # A6, Contact Sexual Abuse
+    "ace_attemptintercorse_yn",# A7, Contact Sexual Abuse
+    "ace_forceintercourse_yn", # A8, Contact Sexual Abuse
+    "ace_famaddict",           # F1, Alcohol in household
+    "ace_famjail",             # F3, Incarcerated household member
+    "ace_famdepr",             # F2, Someone Chronically mentally ill
+    "ace_hminsult_yn",         # F6, Household member treated violently
+    "ace_hmviolence_yn",       # F7, Household member treated violently
+    "ace_hmviolenceobj_yn",    # F8, Household member treated violently
+    "ace_pardivor",            # F4, One or No Parent
+    "ace_pardie",              # F5, One or No Parent
+    "ace_parprob_yn",          # P1, Emotional Neglect
+    "ace_parknow_yn",          # P2, Emotional Neglect
+    "ace_parfood_yn",          # P3, Physical Neglect
+    "ace_pardrunk_yn",         # P4, Physical Neglect
+    "ace_parschool_yn",        # P5, Physical Neglect
+    "ace_bullied_yn",          # V1, Bullying
+    "ace_fight_yn",            # V2, Bullying
+    "ace_cmbeat_yn",           # V4, Community Violence
+    "ace_cmstab_yn",           # V5, Community Violence
+    "ace_cmthreat_yn",         #V6, Community Violence
+    "ace_move_yn",             # V7, Collective Violence
+    "ace_destruct_yn",          # V, Collective Violence8
+    "ace_colbeat_yn",           # V9, Collective Violence
+    "ace_colfmviol_yn"          # V10, Collective Violence
+    ))
+```
+
+Creating a function that will ensure the ACE variables are present in the data set, calculate frequencies and percentages. These will then be bound to the data frame created in the above chunk. 
+```{r}
+results_list <- lapply(ace_table_structure$Variable_Name, function(var_name) {
+  if (!var_name %in% names(agyw_exp)) {
+    warning(paste("Variable '", var_name, "' not found in agyw_exp. Skipping."))
+    return(data.frame(Variable_Name = var_name, Freq_n = NA_integer_, Percentage = NA_real_))
+  }
+  ace_vector <- agyw_exp[[var_name]]
+  freq_n <- sum(ace_vector == 1, na.rm = TRUE)
+  total_non_na <- sum(!is.na(ace_vector))
+  percentage <- if (total_non_na > 0) (freq_n / total_non_na) * 100 else NA_real_
+  return(data.frame(Variable_Name = var_name, Freq_n = freq_n, Percentage = percentage))
+})
+
+calculated_stats <- bind_rows(results_list)
+
+final_table_data <- ace_table_structure %>%
+  left_join(calculated_stats, by = "Variable_Name") %>%
+  select(ace_Category, question_of_ACE , Freq_n, Percentage)
+```
+
+Formatting the "Prevalence of Adverse Childhood Experiences" table
+```{r}
+ace_prev_table <- final_table_data %>% arrange(ace_Category, question_of_ACE) %>% gt(groupname_col = "ace_Category") %>% 
+    cols_label(question_of_ACE = "ACE Categories and Associated Study Questions",Freq_n = "Freq (n)",Percentage = "Percentage") %>%
+    cols_align(align = "left",
+      columns = c(question_of_ACE)) %>%
+    cols_align(align = "right",columns = c(Freq_n, Percentage)) %>%
+    tab_header(title = "Prevalence of Adverse Childhood Experiences") %>%
+      tab_options(row_group.background.color = "#f0f0f0", row_group.font.weight = "bold")
+print(ace_prev_table)
+```
+
+```{r}
+# --- Frequency Tables for Outcomes ---
+print("Frequency table for 'Had sex without a condom' (dem_without_condom):")
+print(table(agyw_exp$dem_without_condom, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_without_condom, useNA = "ifany")) * 100)
+cat("\n")
+
+print("Frequency table for 'Engaged in sex in exchange of money or other favors' (dem_sex_money):")
+print(table(agyw_exp$dem_sex_money, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_sex_money, useNA = "ifany")) * 100)
+cat("\n")
+
+print("Frequency table for 'Engaged in intravenous drug use' (dem_intravenous_drugs):")
+print(table(agyw_exp$dem_intravenous_drugs, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_intravenous_drugs, useNA = "ifany")) * 100)
+cat("\n")
+
+print("Frequency table for 'Completed Years of Education' (dem_school_year):")
+summary(agyw_exp$dem_school_year)
+hist(agyw_exp$dem_school_year, main="Distribution of School Years", xlab="Years of Education")
+print(table(agyw_exp$dem_school_year, useNA = "ifany"))
+cat("\n")
+
+print("Frequency table for 'Area of Residence' (dem_area_live_in):")
+# 1 = Urban, 2 = Peri-urban, 3 = Rural, 4 = Prefer not to answer
+print(table(agyw_exp$dem_area_live_in, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_area_live_in, useNA = "ifany")) * 100)
+cat("\n")
+# For regression, consider how to handle 'Prefer not to answer' (value 4).
+# One option is to convert it to NA:
+agyw_exp$dem_area_live_in_cat <- ifelse(agyw_exp$dem_area_live_in == 4, NA, agyw_exp$dem_area_live_in)
+agyw_exp$dem_area_live_in_cat <- factor(agyw_exp$dem_area_live_in_cat, labels = c("Urban", "Peri-urban", "Rural"))
+agyw_exp$dem_area_live_in_cat <- factor(agyw_exp$dem_area_live_in_cat,
+                                        levels = c("Urban", "Peri-Urban", "Rural"))
+print("Frequency table for 'Area of Residence (Categorical for modeling)':")
+print(table(agyw_exp$dem_area_live_in_cat, useNA = "ifany"))
+cat("\n")
+
+
+print("Frequency table for 'Formally Employed' (dem_formally_employed):")
+print(table(agyw_exp$dem_formally_employed, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_formally_employed, useNA = "ifany")) * 100)
+cat("\n")
+```
+
+Categorizing Age into 3 categories: 18-19, 20-21, and 22+
+```{r}
+#Initial inspection of [dem_age] 
+print("Frequency table for 'Age (years)':") # This is your renamed dem_age
+summary(agyw_analysis$`Age (years)`)
+hist(agyw_analysis$`Age (years)`, main="Distribution of Age", xlab="Age (years)")
+cat("\n")
+
+agyw_analysis <- agyw_exp %>%
+  mutate(
+    age_category = case_when(
+      `Age (years)` >= 18 & `Age (years)` <= 19 ~ "18-19",
+      `Age (years)` >= 20 & `Age (years)` <= 21 ~ "20-21",
+      `Age (years)` >= 22 ~ "22+",
+      TRUE ~ NA_character_ # Handles NAs in Age (years) or unexpected values
+    ))
+
+agyw_analysis$age_category <- factor(agyw_analysis$age_category,
+                                levels = c("18-19", "20-21", "22+"))
+table(agyw_analysis$age_category)
+```
+
+
+Categorize Number of School Years: 1-4, 5-8, 9-12, 13+
+Derived from 3b. Number of completed years of education
+(Note: Start at Grade 1, Completed primary = 8 years, Secondary = 12 years)
+```{r}
+print("Frequency table for 'Completed Years of Education' (dem_school_year):")
+summary(agyw_analysis$dem_school_year)
+hist(agyw_analysis$dem_school_year, main="Distribution of School Years", xlab="Years of Education")
+print(table(agyw_analysis$dem_school_year, useNA = "ifany"))
+cat("\n")
+
+agyw_analysis <- agyw_analysis %>%
+  mutate(
+    school_years_category = case_when(
+      dem_school_year >= 1 & dem_school_year <= 4 ~ "1-4",
+      dem_school_year >= 5 & dem_school_year <= 8 ~ "5-8",
+      dem_school_year >= 9 & dem_school_year <= 12 ~ "9-12",
+      dem_school_year >= 13 ~ "13+",
+      TRUE ~ NA_character_ # Handles NAs or unexpected values
+    ))
+agyw_analysis$school_years_category <- factor(agyw_analysis$school_years_category,
+                                         levels = c("1-4", "5-8", "9-12", "13+"))
+
+table(agyw_analysis$school_years_category)
+
+```
+
+Categorize Area of Residence:Urban, Peri-Urban, 
+Derived from 3b. Number of completed years of education
+(Note: Start at Grade 1, Completed primary = 8 years, Secondary = 12 years)
+```{r}
+print("Frequency table for 'Area of Residence' (dem_area_live_in):")
+# 1 = Urban, 2 = Peri-urban, 3 = Rural, 4 = Prefer not to answer
+print(table(agyw_exp$dem_area_live_in, useNA = "ifany"))
+print(prop.table(table(agyw_exp$dem_area_live_in, useNA = "ifany")) * 100)
+cat("\n")
+# For regression, consider how to handle 'Prefer not to answer' (value 4).
+# One option is to convert it to NA:
+agyw_exp$dem_area_live_in_cat <- ifelse(agyw_exp$dem_area_live_in == 4, NA, agyw_exp$dem_area_live_in)
+agyw_exp$dem_area_live_in_cat <- factor(agyw_exp$dem_area_live_in_cat, labels = c("Urban", "Peri-urban", "Rural"))
+agyw_exp$dem_area_live_in_cat <- factor(agyw_exp$dem_area_live_in_cat,
+                                        levels = c("Urban", "Peri-Urban", "Rural"))
+print("Frequency table for 'Area of Residence (Categorical for modeling)':")
+print(table(agyw_exp$dem_area_live_in_cat, useNA = "ifany"))
+cat("\n")
+```
+
+Create Table 1 - a summary of the characteristics within the ACE Score groups
+```{r}
+table_1 <-  agyw_exp %>%
+  dplyr::group_by(ace_bin) %>%
+  select(age_category, school_years_category, dem_area_live_in_cat, dem_without_condom, dem_sex_money, dem_intravenous_drugs) %>%
+  tbl_summary(
+    by = ace_bin,
+    missing = "ifany",
+    missing_text = "Missing",
+    label = list(
+      age_category = "Age Categories (Years)",
+      school_years_category = "Number of School Years Obtained",
+      dem_area_live_in_cat = "Type of Living Area",
+      dem_without_condom = "Had Sex Without Out a Condom",
+      dem_sex_money = "Engaged in sex in exchange of money or other favors?",
+      dem_intravenous_drugs = "Engaged in intravenous drug use?"))  %>%
+  add_n() %>%
+  add_overall() %>%
+  modify_spanning_header(all_stat_cols() ~ "Table 1. Distribution of High Adverse Childhood Experience (ACE) Scores vs. Low ACE Scores Among Participants of the AGYW PrEP Study")
+table_1
+```
